@@ -1,39 +1,62 @@
-import bpy
-import bmesh
+import bpy, bmesh
 from mathutils import Vector
-from ... utils.blender_ui import get_dpi, get_dpi_factor
-from ... graphics.drawing2d import draw_text, set_drawing_dpi, draw_box
-from ... preferences import Hops_text_color, Hops_text2_color, Hops_border_color, Hops_border2_color
+from ... preferences import get_preferences
+from ... ui_framework.master import Master
+from ... ui_framework.utils.mods_list import get_mods_list
+from ... utility.base_modal_controls import Base_Modal_Controls
 
-class AdjustBevelWeightOperator(bpy.types.Operator):
+# Cursor Warp imports
+from ... utils.toggle_view3d_panels import collapse_3D_view_panels
+from ... utils.modal_frame_drawing import draw_modal_frame
+from ... utils.cursor_warp import mouse_warp
+from ... addon.utility import method_handler
+
+
+class HOPS_OT_AdjustBevelWeightOperator(bpy.types.Operator):
     bl_idname = "hops.bevel_weight"
     bl_label = "Adjust Bevel Weight"
-    bl_options = {"REGISTER", "UNDO", "GRAB_CURSOR", "BLOCKING"}
-    bl_description = "Change the bevel weight of selected edge"
-   
+    bl_options = {"REGISTER", "UNDO", "BLOCKING"}
+    bl_description = """Adjust the bevel weight of selected edges
+Press H for help"""
+
+
     @classmethod
     def poll(cls, context):
-        ob = context.active_object
-        return(ob and ob.type == 'MESH' and context.mode == 'EDIT_MESH')
+        object = context.active_object
+        return(object.type == 'MESH' and context.mode == 'EDIT_MESH')
 
     def invoke(self, context, event):
 
+        self.value = 0
         self.start_value = self.detect(context)
         self.offset = 0
-        self.start_mouse_position = Vector((event.mouse_region_x, event.mouse_region_y))
-        self.last_mouse_x = event.mouse_region_x
 
-        args = (context, )
-        self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(self.draw, args, "WINDOW", "POST_PIXEL")
+        # Base Systems
+        self.master = Master(context=context)
+        self.master.only_use_fast_ui = True
+        self.base_controls = Base_Modal_Controls(context, event)
+        self.original_tool_shelf, self.original_n_panel = collapse_3D_view_panels()
+        self.draw_handle = bpy.types.SpaceView3D.draw_handler_add(self.safe_draw_shader, (context,), 'WINDOW', 'POST_PIXEL')
+
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
 
     def modal(self, context, event):
-        divisor = 5000 if event.shift else 230
-        offset_x = event.mouse_region_x - self.last_mouse_x
-        self.offset += offset_x / divisor / get_dpi_factor()
-        self.value_base = float("{:.2f}".format(self.start_value - self.offset))
+
+        # Base Systems
+        self.master.receive_event(event=event)
+        self.base_controls.update(context, event)
+        mouse_warp(context, event)
+
+        if self.base_controls.pass_through:
+            return {'PASS_THROUGH'}
+
+
+        self.offset += self.base_controls.mouse
+        self.offset = 1 if self.offset> 1 else self.offset
+        self.offset = -1 if self.offset< -1 else self.offset
+        self.value_base = float("{:.2f}".format(self.start_value + self.offset))
         self.value = max(self.value_base, 0) and min(self.value_base, 1)
 
         if not event.ctrl and not event.shift:
@@ -43,31 +66,49 @@ class AdjustBevelWeightOperator(bpy.types.Operator):
         me = obj.data
         bm = bmesh.from_edit_mesh(me)
         bw = bm.edges.layers.bevel_weight.verify()
-        me.show_edge_bevel_weight = True
-        
-        selected = [ e for e in bm.edges if e.select ]
+
+        selected = [e for e in bm.edges if e.select]
         for e in selected:
             e[bw] = self.value
 
         bmesh.update_edit_mesh(me)
 
+        if self.base_controls.cancel:
+            for e in selected:
+                e[bw] = self.start_value
+            bmesh.update_edit_mesh(me)
+            self.remove_shader()
+            collapse_3D_view_panels(self.original_tool_shelf, self.original_n_panel)
+            self.master.run_fade()
+            return {'CANCELLED'}
 
-        if event.type in ("ESC", "RIGHTMOUSE"):
-            self.value = self.detect(context)
-            return self.finish()
+        if self.base_controls.confirm:
+            self.remove_shader()
+            collapse_3D_view_panels(self.original_tool_shelf, self.original_n_panel)
+            self.master.run_fade()
+            return {'FINISHED'}
 
-        if event.type in ("SPACE", "LEFTMOUSE"):
-            return self.finish() 
+        if event.type == 'A' and event.value == 'PRESS' and event.ctrl:
+            selectedbw = [e for e in bm.edges if e[bw] > 0]
+            for e in selectedbw:
+                e.select_set(True)
 
+        elif event.type == 'A' and event.value == 'PRESS' and not event.ctrl:
+            bpy.ops.mesh.select_linked(delimit=set())
+            selectedbw = [e for e in bm.edges if e[bw] == 0]
 
-        self.last_mouse_x = event.mouse_region_x
+            for e in selectedbw:
+                e.select_set(False)
+                for elem in reversed(bm.select_history):
+                    if isinstance(elem, bmesh.types.BMEdge):
+                        elem.select_set(True)
+
+        self.draw_master(context=context)
+
         context.area.tag_redraw()
+
         return {"RUNNING_MODAL"}
 
-
-    def finish(self):
-        bpy.types.SpaceView3D.draw_handler_remove(self.draw_handler, "WINDOW")
-        return {"FINISHED"}
 
     def detect(self, context):
 
@@ -75,43 +116,73 @@ class AdjustBevelWeightOperator(bpy.types.Operator):
         me = obj.data
         bm = bmesh.from_edit_mesh(me)
         bw = bm.edges.layers.bevel_weight.verify()
-        me.show_edge_bevel_weight = True
 
-        selected = [ e for e in bm.edges if e.select ]
+        selected = [e for e in bm.edges if e.select]
 
         bmesh.update_edit_mesh(me)
-        
+
         if len(selected) > 0:
             return selected[-1][bw]
         else:
             return 0
 
-    def draw(self, context):
-        x, y = self.start_mouse_position
-        value = self.value
 
-        set_drawing_dpi(get_dpi())
-        factor = get_dpi_factor()
-        color_text1 = Hops_text_color()
-        color_text2 = Hops_text2_color()
-        color_border = Hops_border_color()
-        color_border2 = Hops_border2_color()
+    def draw_master(self, context):
+
+        # Start
+        self.master.setup()
+
+        ########################
+        #   Fast UI
+        ########################
+
+        if self.master.should_build_fast_ui():
+
+            win_list = []
+            help_list = []
+            mods_list = []
+            active_mod = ""
+
+            # Main
+            if get_preferences().ui.Hops_modal_fast_ui_loc_options != 1:
+                win_list.append(self.value)
+            else:
+                win_list.append("Bevel Weight")
+                win_list.append(self.value)
+
+            # Help
+            help_list.append(["A",        "Select all weights in mesh"])
+            help_list.append(["Ctrl + A", "Select all weights"])
+            help_list.append(["H",         "Toggle help."])
+            #help_list.append(["M",         "Toggle mods list."])
+
+            # Mods
+            mods_list = get_mods_list(mods=bpy.context.active_object.modifiers)
+
+            self.master.receive_fast_ui(win_list=win_list, help_list=help_list, image="AdjustBevel", mods_list=mods_list, active_mod_name=active_mod)
+
+        # Finished
+        self.master.finished()
+
+    ####################################################
+    #   CURSOR WARP
+    ####################################################
+
+    def safe_draw_shader(self, context):
+        method_handler(self.draw_shader,
+            arguments = (context,),
+            identifier = 'UI Framework',
+            exit_method = self.remove_shader)
 
 
-        draw_box(x -8 * factor, y + 8 * factor, 204 * factor , 34* factor, color = color_border2)
+    def remove_shader(self):
+        '''Remove shader handle.'''
 
-        draw_box(x + 45 * factor, y + 8 * factor, 150 * factor , 30* factor, color = color_border)
-
-        #if bevel.segments >= 10 :
-           # draw_text(str(bevel.segments), x -8 * factor, y, size = 23, color = color_text1)
-        #else:
-           # draw_text(str(bevel.segments), x + 3 * factor, y, size = 23, color = color_text1)
+        if self.draw_handle:
+            self.draw_handle = bpy.types.SpaceView3D.draw_handler_remove(self.draw_handle, "WINDOW")
 
 
-        draw_text(" {:.2f} - B-Weight".format(value),
-                  x -8 * factor, y, size = 20, color = color_text2)
+    def draw_shader(self, context):
+        '''Draw shader handle.'''
 
-
-        #this never worked anyway, do we need it ?
-        '''draw_text(self.get_description_text(), x + 24 * factor, y - 28 * factor,
-                                          size = 12, color = color)'''
+        draw_modal_frame(context)

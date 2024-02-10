@@ -1,25 +1,30 @@
 import bpy
-import bmesh
 from ... utils.objects import obj_quads_to_tris
 
-class HopsDrawUV(bpy.types.Operator):
-        '''Tooltip'''
-        bl_description = "draw uv in 3d view"
+
+class HOPS_OT_DrawUV(bpy.types.Operator):
         bl_idname = "hops.draw_uv"
         bl_label = "Draw UV"
+        bl_description = "Draw UVs in the 3d view"
         bl_options = {'REGISTER', 'UNDO'}
 
+        @classmethod
+        def poll(cls, context):
+            object = context.active_object
+            if object is None: return False
+            return object.type == "MESH"
+
         def execute(self, context):
-        	
-            try :
+
+            try:
                 hops_draw_uv()
-            except RuntimeError :
+            except RuntimeError:
                 bpy.ops.ed.undo()
 
             return {"FINISHED"}
 
-def hops_draw_uv():
 
+def hops_draw_uv():
     bpy.ops.ed.undo_push()
     bpy.ops.ed.undo_push()
     obj_quads_to_tris()

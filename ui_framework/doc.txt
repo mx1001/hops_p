@@ -1,0 +1,93 @@
+####################################################################################################
+#
+#   Modal Dictionary Docs
+#
+####################################################################################################
+
+
+The modal dictionarys have the following forms.
+
+___MAIN WINDOW___
+
+    main_window = {
+        "main_count" : [],
+        "header_sub_text" : [],
+        "last_col_cell_1" : [],
+        "last_col_cell_2" : [],
+        "last_col_cell_3" : []
+    }
+
+
+    The keys in this dictionary will respond to its location in the main window UI.
+    You must add some value to each of the predefined keys or the UI will have blank spots.
+    The value of the keys can have the following forms.
+
+    key value options:
+
+        key = "STRING"
+        key = ["STRING", callback_function]
+        key = ["STRING", callback_function, (positive arguments)]
+        key = ["STRING", callback_function, (positive arguments), (negative arguments)]
+
+        callback_function    = A function that will be called when the cell is clicked
+        (positive arguments) = A tuple of arguments that will be passed to the function when the cell is clicked
+        (negative arguments) = A tuple of arguments that will be passed to the function when the cell is ALT clicked
+
+___HELP WINDOW___
+
+    This is the same as the main window with one exception.
+    The key is equal to the hot key.
+
+    You can have as many key value pairs as you need.
+    The value to the key can have the same forms as the main window values.
+        For the value of the keys look at main window (key value options) in the above section.
+
+
+___MODS WINDOW___
+
+    Loop over all the modifiers in 'reversed' and make the key equal to the name of the mod.
+    The value to the key is the mod type.
+
+    When passing the dictionary to master, send the active modifiers name so that the UI can highlight it.
+
+
+
+
+####################################################################################################
+#
+#   Running Struct of Framework
+#
+####################################################################################################
+
+
+Database:
+
+    Windows {}
+        key = window_key
+        val = window_cls
+
+            Window Class
+                panels = []
+                
+                    Panel Class
+                        widget_cls
+
+                            Widget Class
+                                layout_cls
+
+                                    Layout Class
+                                        rows = []
+
+                                            Row Class
+                                                columns = []
+
+                                                    Column Class
+                                                        cells = []
+
+                                                            Cell Class
+                                                                elements = []
+
+                                                                    Element Class
+                                                                        Drawing...
+
+

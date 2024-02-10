@@ -1,8 +1,8 @@
-from os.path import dirname
 import bpy
-from ... import keymap
+from ...  addon.property.preference import keymap
 
-class OpenKeymapForEditing(bpy.types.Operator):
+
+class HOPS_OT_OpenKeymapForEditing(bpy.types.Operator):
     bl_idname = "hops.open_keymap_for_editing"
     bl_label = "Open Keymap for Editing"
     bl_description = "Load the keymap.py file so that you can change the keys in the Text Editor"

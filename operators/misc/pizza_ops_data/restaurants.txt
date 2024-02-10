@@ -1,0 +1,26 @@
+{
+    "little_caesar" : {
+        "icon"        : "little_caesar_icon",
+        "description" : "Little Caesar",
+        "link"        : "https://littlecaesars.com" },
+
+    "dominos_pizza": { 
+        "icon"        : "dominos_pizza_icon",
+        "description" : "Dominos",
+        "link"        : "https://www.dominos.com" },
+
+    "papa_johns": { 
+        "icon"        : "papa_johns_icon",
+        "description" : "Papa John's",
+        "link"        : "https://www.papajohns.com" },
+
+    "pizza_hut": { 
+        "icon"        : "pizza_hut_icon",
+        "description" : "Pizza Hut",
+        "link"        : "https://www.pizzahut.com" },
+     
+    "your_place_here": { 
+        "icon"        : "insert",
+        "description" : "Insert Location",
+        "link"        : "https://blenderartists.org/" }
+}

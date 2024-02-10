@@ -2,10 +2,10 @@ import bpy
 from bgl import *
 from mathutils import Vector
 from .. graphics.rectangle import Rectangle
-from .. overlay_drawer import show_custom_overlay, disable_active_overlays
+#from .. overlay_drawer import show_custom_overlay, disable_active_overlays
 from .. utils.blender_ui import get_location_in_current_3d_view, get_dpi_factor
 
-class DrawObjectUVs(bpy.types.Operator):
+class HOPS_OT_DrawObjectUVs(bpy.types.Operator):
     bl_idname = "hops.draw_object_uvs"
     bl_label = "Draw Object UVs"
 
@@ -21,7 +21,7 @@ class DrawObjectUVs(bpy.types.Operator):
     def execute(self, context):
         object = context.active_object
 
-        disable_active_overlays()
+        #disable_active_overlays()
 
         dpi_factor = get_dpi_factor()
         scale = 200 * dpi_factor

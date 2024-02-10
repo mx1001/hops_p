@@ -1,0 +1,28 @@
+
+Master -> only update when dict is changing or mouse event.
+UI_Event -> Only run event() if the mouse is over a window.
+Window_Gizmo -> only check if mouse is near it.
+
+Drawing Functions -> Need to be turned into classes so it only rebuilds batch when needed.
+
+
+
+TODO:
+ -> clamp the window to a min and max height
+ -> clamp the window to a min and max width
+
+
+
+
+MX2 Notes:
+Clicking on arrays in mods panel switches to another mod.
+Drag and drop mods in mod panel.
+
+
+More mods to show on fast ui
+    Expose the count
+
+Borders around the little boxes
+
+Click hot key for actions instead of description
+

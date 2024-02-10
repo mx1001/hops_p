@@ -1,235 +1,331 @@
-#Mirror Mirror Integration V1
 import bpy
-from bgl import *
-from bpy.props import *
-from math import radians, degrees
+import mathutils
+from ... preferences import get_preferences
 from ... utils.context import ExecutionContext
-from ... preferences import tool_overlays_enabled, get_hops_preferences_colors_with_transparency, Hops_display_time, Hops_fadeout_time
-from ... utils.blender_ui import get_location_in_current_3d_view
-from .. utils import clear_ssharps, mark_ssharps, set_smoothing
-from ... overlay_drawer import show_custom_overlay, disable_active_overlays, show_text_overlay
-from ... graphics.drawing2d import set_drawing_dpi, draw_horizontal_line, draw_boolean, draw_text, draw_box, draw_logo_csharp
+from ... utility import modifier as modsort
 
-import bpy
-from bpy.app.handlers import persistent
+# Do the Basic Union, Difference and Intersection operations
 
-#------------------- FUNCTIONS------------------------------
-# Do the Basic Union, Difference and Intersection Operations
-def Operation(context,_operation):
-        ''' select the object, then select what you want it's mirror object to be '''
-        #select 2 context object
-    
-        try:
-            # select objects
-     
-            if(len(bpy.context.selected_objects)) == 1 : # one is selected , add mirror mod immediately to that object#
-                modifier_ob = bpy.context.active_object         
-                mirror_mod = modifier_ob.modifiers.new("mirror_mirror","MIRROR")
-          
 
-            else:
-                mirror_ob = bpy.context.active_object         # last ob selected
-                mirror_ob.select = False # pop modifier_ob from sel_stack
-                modifier_ob = bpy.context.selected_objects[0]
+def operation(context, _operation, x, y, z, zx, zy, zz, direction, used_axis):
 
-                mirror_mod = modifier_ob.modifiers.new("mirror_mirror","MIRROR")
-                mirror_mod.mirror_object = mirror_ob
-                
-            if _operation == "MIRROR_X":
-                mirror_mod.use_x = True
-                mirror_mod.use_y = False
-                mirror_mod.use_z = False
-            elif _operation == "MIRROR_Y":
-                mirror_mod.use_x = False
-                mirror_mod.use_y = True
-                mirror_mod.use_z = False
-            elif _operation == "MIRROR_Z":
-                mirror_mod.use_x = False
-                mirror_mod.use_y = False
-                mirror_mod.use_z = True
-            
-            mirror_ob.select= 1
-            modifier_ob.select=1
-            bpy.context.scene.objects.active = modifier_ob
-        except: 
-            pass
-           
-#------------------- OPERATOR CLASSES ------------------------------                
-# Mirror Tool                 
+        object = bpy.context.active_object
+        object.select_set(True)
+        if(len(bpy.context.selected_objects)) == 1:  # one is selected , add mirror mod immediately to that object#
+            if object.type in {"MESH", "CURVE"}:
+                if object.type in {"CURVE"}:
+                    if get_preferences().property.Hops_mirror_modes != "MODIFIER":
+                        bpy.ops.object.convert(target='MESH')
+                if get_preferences().property.Hops_mirror_modes == "MODIFIER":
+                    with ExecutionContext(mode="OBJECT", active_object=object):
+                        mirror_mod = None
+                        for modifier in object.modifiers:
+                            if modifier.name == "hops_mirror":
+                                mirror_mod = modifier
+                        if mirror_mod is None:
+                            mirror_mod = object.modifiers.new("hops_mirror", "MIRROR")
+                            mirror_mod.use_clip = True
+                            mirror_mod.use_axis[0] = False
+                            mirror_mod.use_axis[1] = False
+                            mirror_mod.use_axis[2] = False
 
-class MirrorX(bpy.types.Operator):
-    """This adds an X mirror to the selected object"""
+                            mirror_mod.use_mirror_u = get_preferences().property.Hops_gizmo_mirror_u
+                            mirror_mod.use_mirror_v = get_preferences().property.Hops_gizmo_mirror_v
+
+
+                elif get_preferences().property.Hops_mirror_modes == "BISECT":
+                    with ExecutionContext(mode="OBJECT", active_object=object):
+                        if get_preferences().property.Hops_mirror_direction == "+":
+                            clear_inner = True
+                            clear_outer = False
+                        elif get_preferences().property.Hops_mirror_direction == "-":
+                            clear_inner = False
+                            clear_outer = True
+
+                        bpy.ops.object.mode_set(mode='EDIT')
+                        bpy.ops.mesh.select_all(action='SELECT')
+                        bpy.ops.mesh.bisect(plane_co=(x, y, z), plane_no=(zx, zy, zz), clear_inner=clear_inner, clear_outer=clear_outer)
+                        bpy.ops.mesh.select_all(action='DESELECT')
+                        bpy.ops.object.mode_set(mode='OBJECT')
+                        object = bpy.context.active_object
+                        mirror_mod = None
+                        if get_preferences().property.Hops_mirror_modal_mod_on_bisect:
+                            for modifier in object.modifiers:
+                                if modifier.name == "hops_mirror":
+                                    mirror_mod = modifier
+                            if mirror_mod is None:
+                                mirror_mod = object.modifiers.new("hops_mirror", "MIRROR")
+                                mirror_mod.use_clip = True
+                                mirror_mod.use_axis[0] = False
+                                mirror_mod.use_axis[1] = False
+                                mirror_mod.use_axis[2] = False
+
+                                mirror_mod.use_mirror_u = get_preferences().property.Hops_gizmo_mirror_u
+                                mirror_mod.use_mirror_v = get_preferences().property.Hops_gizmo_mirror_v
+
+                elif get_preferences().property.Hops_mirror_modes == "SYMMETRY":
+                    with ExecutionContext(mode="EDIT", active_object=object):
+                        bpy.ops.mesh.select_all(action='SELECT')
+                        bpy.ops.mesh.symmetrize(direction=direction)
+                        bpy.ops.mesh.select_all(action='DESELECT')
+
+                if get_preferences().property.Hops_mirror_modal_mod_on_bisect:
+                    mods = {"BISECT", "MODIFIER"}
+                else:
+                    mods = {"MODIFIER"}
+                if get_preferences().property.Hops_mirror_modes in mods:
+                    if _operation == "MIRROR_X":
+                        mirror_mod.use_axis[0] = True
+                        if get_preferences().property.Hops_mirror_modes == "MODIFIER":
+                            mirror_mod.use_bisect_axis[0] = True
+                            if get_preferences().property.Hops_mirror_direction == "-":
+                                mirror_mod.use_bisect_flip_axis[0] = True
+                            else:
+                                mirror_mod.use_bisect_flip_axis[0] = False
+                            mirror_mod.show_on_cage = True
+                    elif _operation == "MIRROR_Y":
+                        mirror_mod.use_axis[1] = True
+                        if get_preferences().property.Hops_mirror_modes == "MODIFIER":
+                            mirror_mod.use_bisect_axis[1] = True
+                            if get_preferences().property.Hops_mirror_direction == "-":
+                                mirror_mod.use_bisect_flip_axis[1] = True
+                            else:
+                                mirror_mod.use_bisect_flip_axis[1] = False
+                            mirror_mod.show_on_cage = True
+                    elif _operation == "MIRROR_Z":
+                        mirror_mod.use_axis[2] = True
+                        if get_preferences().property.Hops_mirror_modes == "MODIFIER":
+                            mirror_mod.use_bisect_axis[2] = True
+                            if get_preferences().property.Hops_mirror_direction == "-":
+                                mirror_mod.use_bisect_flip_axis[2] = True
+                            else:
+                                mirror_mod.use_bisect_flip_axis[2] = False
+                            mirror_mod.show_on_cage = True
+
+            elif object.type == "GPENCIL":
+                mirror_mod = None
+                for modifier in object.grease_pencil_modifiers:
+                    if modifier.name == "hops_mirror":
+                        mirror_mod = modifier
+
+                if mirror_mod is None:
+                    mirror_mod = object.grease_pencil_modifiers.new("hops_mirror", "GP_MIRROR")
+                    mirror_mod.x_axis = False
+
+                if _operation == "MIRROR_X":
+                    mirror_mod.x_axis = not mirror_mod.x_axis
+                elif _operation == "MIRROR_Y":
+                    mirror_mod.y_axis = not mirror_mod.y_axis
+                elif _operation == "MIRROR_Z":
+                    mirror_mod.z_axis = not mirror_mod.z_axis
+
+        else:
+            if get_preferences().property.Hops_mirror_modes_multi == "VIA_ACTIVE":
+                with ExecutionContext(mode="OBJECT", active_object=object):
+                    mirror_ob = bpy.context.active_object  # last ob selected
+                    for obj in bpy.context.selected_objects:
+                        if obj != mirror_ob:
+                            if obj.type in {"MESH", "CURVE"}:
+
+                                mirror_ob.select_set(False)  # pop object from sel_stack
+                                object = obj
+
+                                mirror_mod_multi = None
+                                for modifier in object.modifiers:
+                                    if modifier.name == "hops_mirror_via_active":
+                                        mirror_mod_multi = modifier
+
+                                if mirror_mod_multi is None:
+                                    mirror_mod_multi = object.modifiers.new("hops_mirror_via_active", "MIRROR")
+                                    mirror_mod_multi.use_axis[0] = False
+                                    mirror_mod_multi.use_axis[1] = False
+                                    mirror_mod_multi.use_axis[2] = False
+                                    mirror_mod_multi.use_clip = True
+                                    mirror_mod_multi.mirror_object = mirror_ob
+
+                                    mirror_mod_multi.use_mirror_u = get_preferences().property.Hops_gizmo_mirror_u
+                                    mirror_mod_multi.use_mirror_v = get_preferences().property.Hops_gizmo_mirror_v
+
+
+                                if _operation == "MIRROR_X":
+                                    mirror_mod_multi.use_axis[0] = True
+                                    if get_preferences().property.Hops_mirror_direction == "-":
+                                        mirror_mod_multi.use_bisect_axis[0] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[0] = True
+                                    else:
+                                        mirror_mod_multi.use_bisect_axis[0] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[0] = False
+                                elif _operation == "MIRROR_Y":
+                                    mirror_mod_multi.use_axis[1] = True
+                                    if get_preferences().property.Hops_mirror_direction == "-":
+                                        mirror_mod_multi.use_bisect_axis[1] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[1] = True
+                                    else:
+                                        mirror_mod_multi.use_bisect_axis[1] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[1] = False
+                                elif _operation == "MIRROR_Z":
+                                    mirror_mod_multi.use_axis[2] = True
+                                    if get_preferences().property.Hops_mirror_direction == "-":
+                                        mirror_mod_multi.use_bisect_axis[2] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[2] = True
+                                    else:
+                                        mirror_mod_multi.use_bisect_axis[2] = True
+                                        mirror_mod_multi.use_bisect_flip_axis[2] = False
+
+            elif get_preferences().property.Hops_mirror_modes_multi == "SYMMETRY":
+                selected = bpy.context.selected_objects
+                for obj in selected:
+                    bpy.context.view_layer.objects.active = obj
+                    with ExecutionContext(mode="EDIT", active_object=obj):
+                        bpy.ops.mesh.select_all(action='SELECT')
+                        bpy.ops.mesh.symmetrize(direction=direction)
+                        bpy.ops.mesh.select_all(action='DESELECT')
+        # mirror_ob.select = 1
+        # object.select = 1
+        bpy.context.view_layer.objects.active = object
+
+        modsort.sort(object, sort_types=['WEIGHTED_NORMAL'])
+
+
+# ------------------- OPERATOR CLASSES ------------------------------
+# Mirror Tool
+
+# legacy
+
+class HOPS_OT_MirrorX(bpy.types.Operator):
     bl_idname = "hops.mirror_mirror_x"
     bl_label = "Mirror X"
-    bl_options = {"REGISTER", "UNDO"}
-    
-    axis = "X"
-    
+    bl_description = "Mirror On the X Axis"
+    bl_options = {"REGISTER", "UNDO", 'INTERNAL'}
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(get_preferences(), "Hops_mirror_direction")
+        layout.prop(get_preferences(), "Hops_mirror_modes")
 
     @classmethod
     def poll(cls, context):
+        # selected = context.selected_objects
         object = context.active_object
-        return context.active_object is not None
-    
-    def invoke(self, context, event):
-        self.execute(context)
-        
- 
-        if tool_overlays_enabled():
-            disable_active_overlays()
-            self.wake_up_overlay = show_custom_overlay(draw,
-                parameter_getter = self.parameter_getter,
-                location = get_location_in_current_3d_view("CENTER", "BOTTOM", offset = (0, 130)),
-                location_type = "CUSTOM",
-                stay_time = Hops_display_time(),
-                fadeout_time = Hops_fadeout_time())
-     
-        return {"FINISHED"}
-    
-    def parameter_getter(self):
-        return self.axis
-    
+        if object is None: return False
+        if object.mode in {"OBJECT", "EDIT"}:
+            return True
+
     def execute(self, context):
-        Operation(context,"MIRROR_X")
-        
-        try: self.wake_up_overlay()
-        except: pass
+        x, y, z = bpy.context.object.location
+        zx, zy, zz = bpy.context.object.rotation_euler
+
+        if get_preferences().property.Hops_mirror_direction == "+":
+            direction = "POSITIVE_X"
+        elif get_preferences().property.Hops_mirror_direction == "-":
+            direction = "NEGATIVE_X"
+        used_axis = "X"
+
+        vec = mathutils.Vector((1, 0, 0))
+        mat = mathutils.Matrix.Rotation(zx, 4, "X")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zy, 4, "Y")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zz, 4, "Z")
+        vec.rotate(mat)
+
+        nx = vec[0]
+        ny = vec[1]
+        nz = vec[2]
+
+        operation(context, "MIRROR_X", x, y, z, nx, ny, nz, direction, used_axis)
+
         return {'FINISHED'}
-    
-    
-class MirrorY(bpy.types.Operator):
-    """This  adds a Y mirror modifier"""
+
+class HOPS_OT_MirrorY(bpy.types.Operator):
     bl_idname = "hops.mirror_mirror_y"
     bl_label = "Mirror Y"
-    bl_options = {"REGISTER", "UNDO"}
-    
-    axis = "Y"
-    
+    bl_description = "Mirror On the Y Axis"
+    bl_options = {"REGISTER", "UNDO", 'INTERNAL'}
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(get_preferences(), "Hops_mirror_direction")
+        layout.prop(get_preferences(), "Hops_mirror_modes")
+
     @classmethod
     def poll(cls, context):
+        # selected = context.selected_objects
         object = context.active_object
-        return context.active_object is not None
-    
-    def invoke(self, context, event):
-        self.execute(context)
-        
-        object = bpy.context.active_object
-        if object.hops.status != "CSTEP":
-            if tool_overlays_enabled():
-                disable_active_overlays()
-                self.wake_up_overlay = show_custom_overlay(draw,
-                    parameter_getter = self.parameter_getter,
-                    location = get_location_in_current_3d_view("CENTER", "BOTTOM", offset = (0, 130)),
-                    location_type = "CUSTOM",
-                    stay_time = Hops_display_time(),
-                    fadeout_time = Hops_fadeout_time())
-        
+        if object is None: return False
+        if object.mode in {"OBJECT", "EDIT"}:
+            return True
 
-        return {"FINISHED"}
-    
-    def parameter_getter(self):
-        return self.axis
-    
     def execute(self, context):
-        Operation(context,"MIRROR_Y")
-        
-        try: self.wake_up_overlay()
-        except: pass
+        x, y, z = bpy.context.object.location
+        zx, zy, zz = bpy.context.object.rotation_euler
+
+        if get_preferences().property.Hops_mirror_direction == "+":
+            direction = "POSITIVE_Y"
+        elif get_preferences().property.Hops_mirror_direction == "-":
+            direction = "NEGATIVE_Y"
+        used_axis = "Y"
+
+        vec = mathutils.Vector((0, 1, 0))
+        mat = mathutils.Matrix.Rotation(zx, 4, "X")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zy, 4, "Y")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zz, 4, "Z")
+        vec.rotate(mat)
+
+        nx = vec[0]
+        ny = vec[1]
+        nz = vec[2]
+
+        operation(context, "MIRROR_Y", x, y, z, nx, ny, nz, direction, used_axis)
+
         return {'FINISHED'}
 
-class MirrorZ(bpy.types.Operator):
-    """This  add a Z mirror modifier"""
+
+class HOPS_OT_MirrorZ(bpy.types.Operator):
     bl_idname = "hops.mirror_mirror_z"
     bl_label = "Mirror Z"
-    bl_options = {"REGISTER", "UNDO"}
+    bl_description = "Mirror On the Z Axis"
+    bl_options = {"REGISTER", "UNDO", 'INTERNAL'}
 
-    axis = "Z"
-    
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(get_preferences(), "Hops_mirror_direction")
+        layout.prop(get_preferences(), "Hops_mirror_modes")
+
     @classmethod
     def poll(cls, context):
         object = context.active_object
-        return context.active_object is not None
-    
-    def invoke(self, context, event):
-        self.execute(context)
-        
-        object = bpy.context.active_object
-        if object.hops.status != "CSTEP":
-            if tool_overlays_enabled():
-                disable_active_overlays()
-                self.wake_up_overlay = show_custom_overlay(draw,
-                    parameter_getter = self.parameter_getter,
-                    location = get_location_in_current_3d_view("CENTER", "BOTTOM", offset = (0, 130)),
-                    location_type = "CUSTOM",
-                    stay_time = Hops_display_time(),
-                    fadeout_time = Hops_fadeout_time())
+        if object is None: return False
+        if object.mode in {"OBJECT", "EDIT"}:
+            return True
 
-        return {"FINISHED"}
-    
-    def parameter_getter(self):
-        return self.axis
-    
     def execute(self, context):
-        Operation(context,"MIRROR_Z")
-        
-        try: self.wake_up_overlay()
-        except: pass
+        x, y, z = bpy.context.object.location
+        zx, zy, zz = bpy.context.object.rotation_euler
+
+        if get_preferences().property.Hops_mirror_direction == "+":
+            direction = "POSITIVE_Z"
+        elif get_preferences().property.Hops_mirror_direction == "-":
+            direction = "NEGATIVE_Z"
+        used_axis = "Z"
+
+        vec = mathutils.Vector((0, 0, 1))
+        mat = mathutils.Matrix.Rotation(zx, 4, "X")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zy, 4, "Y")
+        vec.rotate(mat)
+        mat = mathutils.Matrix.Rotation(zz, 4, "Z")
+        vec.rotate(mat)
+
+        nx = vec[0]
+        ny = vec[1]
+        nz = vec[2]
+
+        operation(context, "MIRROR_Z", x, y, z, nx, ny, nz, direction, used_axis)
+
         return {'FINISHED'}
-    
-# Overlay
-###################################################################
-
-def draw(display, parameter_getter):
-    axis = parameter_getter()
-    scale_factor = 0.9
-
-    glEnable(GL_BLEND)
-    glEnable(GL_LINE_SMOOTH)
-
-    set_drawing_dpi(display.get_dpi() * scale_factor)
-    dpi_factor = display.get_dpi_factor() * scale_factor
-    line_height = 18 * dpi_factor
-
-    transparency = display.transparency
-
-    color_text1, color_text2, color_border, color_border2 = get_hops_preferences_colors_with_transparency(transparency)
-    region_width = bpy.context.region.width
-
-
-    # Box
-    ########################################################
-
-    location = display.location
-    x, y = location.x - 60* dpi_factor, location.y - 118* dpi_factor
-
-    draw_box(0, 43 *dpi_factor, region_width, -4 * dpi_factor, color = color_border2)
-    draw_box(0, 0, region_width, -82 * dpi_factor, color = color_border)
-
-    draw_logo_csharp(color_border2) #Logo so illa. I love this bitch.
-
-
-    # Name
-    ########################################################
-    draw_text("MIRROR_mirror", x - 380 *dpi_factor , y -12*dpi_factor,
-              align = "LEFT", size = 20 , color = color_text2)
-
-    
-    # First Coloumn
-    ########################################################
-    x = x - 160 * dpi_factor
-    r = 34 * dpi_factor
-
-    draw_text("AXIS", x , y,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_text(axis, x + r, y,
-              align = "LEFT",size = 11, color = color_text2)
-              
-    #draw_text("Mirrored Across: ", x, y - line_height,
-    #          align = "LEFT", size = 12, color = color_text2)
-
-    #draw_text(axis, x + r, y - line_height,
-    #          align = "LEFT", size = 12, color = color_text2)
-
-    glDisable(GL_BLEND)
-    glDisable(GL_LINE_SMOOTH)

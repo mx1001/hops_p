@@ -1,11 +1,11 @@
 import bpy
 
 def invoke_individual_resizing():
-    space = bpy.context.space_data
-    old = space.pivot_point
-    space.pivot_point = "INDIVIDUAL_ORIGINS"
+    space = bpy.context.scene.tool_settings #bpy.context.space_data
+    old = space.transform_pivot_point
+    space.transform_pivot_point = "INDIVIDUAL_ORIGINS"
     bpy.ops.transform.resize("INVOKE_DEFAULT")
-    space.pivot_point = old
+    space.transform_pivot_point = old
 
 def locate_sharps(ssharpangle,all_sharp):
     if all_sharp:

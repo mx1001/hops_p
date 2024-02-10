@@ -2,75 +2,123 @@ import bpy
 from mathutils import Vector
 from bpy.types import Operator
 from bpy.props import IntProperty, FloatProperty
+from bgl import *
+from gpu_extras.batch import batch_for_shader
 from ... utils.blender_ui import get_dpi, get_dpi_factor
-from ... graphics.drawing2d import draw_horizontal_line, draw_text, set_drawing_dpi, draw_box
-from ... preferences import Hops_text_color, Hops_text2_color, Hops_border_color, Hops_border2_color
+from ... graphics.drawing2d import draw_text, set_drawing_dpi, draw_box
+from ... preferences import get_preferences
+from ...ui_framework.master import Master
+from ...ui_framework.utils.mods_list import get_mods_list
+from . import infobar
 
-class curve_stretch(Operator):
+class HOPS_OT_CurveStretch(Operator):
     bl_idname = "mesh.curve_stretch"
-    bl_label = "Curve Stretch"
-    bl_description = "Deform the selected loop(s) along a curve."
+    bl_label = "Curve Stretch Helper"
+    bl_description = "Preconfiguration for Mira Tools Curve Stretch"
     bl_options = {"REGISTER", "GRAB_CURSOR", "BLOCKING"}
 
-    first_mouse_x = IntProperty()
-    first_value = FloatProperty()
-    second_value = IntProperty()
+    first_mouse_x : IntProperty()
+    first_value : FloatProperty()
+    second_value : IntProperty()
+
+    def __init__(self):
+
+        # Modal UI
+        self.master = None
+
 
     def modal(self, context, event):
 
         curve = context.scene.mi_cur_stretch_settings
-        offset_x = event.mouse_region_x - self.last_mouse_x
+
+        # UI
+        self.master.receive_event(event=event)
+
+        self.mouse = [event.mouse_region_x, event.mouse_region_y]
+        # offset_x = event.mouse_region_x - self.last_mouse_x
 
         if event.type == 'WHEELUPMOUSE':
 
             if curve.points_number < 12:
 
                 curve.points_number += 1
+                self.report({'INFO'}, F'Curve Points: {curve.points_number}')
 
         if event.type == 'WHEELDOWNMOUSE':
 
             if curve.points_number > 2:
 
                 curve.points_number -= 1
+                self.report({'INFO'}, F'Curve Points: {curve.points_number}')
 
         if event.type in {'LEFTMOUSE', 'RET', 'NUMPAD_ENTER'}:
-
             bpy.ops.mira.curve_stretch('INVOKE_DEFAULT')
-            self.finish()
-            return {"FINISHED"}
+            context.window_manager.event_timer_remove(self.timer)
+            self.master.run_fade()
+            infobar.remove(self)
+            return {'FINISHED'}
 
         if event.type in {'RIGHTMOUSE', 'ESC', 'BACK_SPACE'}:
+            context.window_manager.event_timer_remove(self.timer)
+            self.master.run_fade()
+            infobar.remove(self)
             return {'CANCELLED'}
+
+        self.draw_master(context=context)
 
         self.last_mouse_x = event.mouse_region_x
         context.area.tag_redraw()
         return {'RUNNING_MODAL'}
 
     def invoke(self, context, event):
+        self.report({'INFO'}, F'HOPS: Frontend for Mira CurveStretch. Scroll to adjust count. Click to proceed')
         self.last_mouse_x = event.mouse_region_x
         self.start_mouse_position = Vector((event.mouse_region_x, event.mouse_region_y))
 
-        args = (context, )
-        self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(self.draw, args, "WINDOW", "POST_PIXEL")
+        #UI System
+        self.master = Master(context=context)
+        self.master.only_use_fast_ui = True
+        self.timer = context.window_manager.event_timer_add(0.025, window=context.window)
+
         context.window_manager.modal_handler_add(self)
+        infobar.initiate(self)
         return {'RUNNING_MODAL'}
 
-    def finish(self):
-        bpy.types.SpaceView3D.draw_handler_remove(self.draw_handler, "WINDOW")
-        return {"FINISHED"}
 
-    def draw(self, context):
-        x, y = self.start_mouse_position
-        #first_value = self.first_value
+    def draw_master(self, context):
+
+        # Start
+        self.master.setup()
         curve = context.scene.mi_cur_stretch_settings
 
-        set_drawing_dpi(get_dpi())
-        factor = get_dpi_factor()
-        color_text1 = Hops_text_color()
-        color_text2 = Hops_text2_color()
-        color_border = Hops_border_color()
-        color_border2 = Hops_border2_color()
+        ########################
+        #   Fast UI
+        ########################
 
-        draw_box(x - 14 * factor, y + 8 * factor, 34 * factor , 34* factor, color = color_border2)
 
-        draw_text("{:.0f}".format(curve.points_number),  x - 6 * factor, y, size = 23, color = color_text1)
+        if self.master.should_build_fast_ui():
+
+            win_list = []
+            help_list = []
+            mods_list = []
+            active_mod = ""
+
+            # Main
+            if get_preferences().ui.Hops_modal_fast_ui_loc_options != 1: #Fast Floating
+                win_list.append(curve.points_number)
+            else:
+                win_list.append("Mira Curve Setup")
+                win_list.append(curve.points_number)
+
+            # Help
+            help_list.append(["Scroll",  "Adust Mira Curve"])
+            help_list.append(["LMB",     "Proceed To Curve"])
+            help_list.append(["ESC",     "Cancel"])
+
+            # Mods
+            mods_list = get_mods_list(mods=bpy.context.active_object.modifiers)
+
+            self.master.receive_fast_ui(win_list=win_list, help_list=help_list, image="BevelAll", mods_list=mods_list, active_mod_name=active_mod)
+
+        # Finished
+        self.master.finished()

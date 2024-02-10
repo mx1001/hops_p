@@ -1,201 +1,149 @@
-import os
 import bpy
 import bmesh
-from bgl import *
-from bpy.props import *
-from bpy.props import *
+from math import degrees
 import bpy.utils.previews
-from random import choice
-from math import pi, radians
-from math import radians, degrees
-from ... utils.blender_ui import get_location_in_current_3d_view
-from ... overlay_drawer import show_custom_overlay, disable_active_overlays, show_text_overlay
-from ... graphics.drawing2d import set_drawing_dpi, draw_horizontal_line, draw_boolean, draw_text, draw_box, draw_logo_csharp
-from ... preferences import tool_overlays_enabled, get_hops_preferences_colors_with_transparency, Hops_display_time, Hops_fadeout_time
+from ... preferences import get_preferences
+from ...ui_framework.operator_ui import Master
 
 
-#_____________________________________________________________clean mesh (OBJECT MODE)________________________
-class clean_MeshOperator(bpy.types.Operator):
-    '''Remove Doubles / Limited Disolve'''
-    bl_idname = "view3d.clean_mesh"
-    bl_label = "Limited Dissolve"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    dissolve_angle = FloatProperty(name = "Limited Dissolve Angle", default = radians(0.5),
-                              min = radians(0), max = radians(30), subtype = "ANGLE")                              
-    remove_threshold = FloatProperty(name="Remove Threshold Amount",
-                               description="Remove Double Amount",
-                               default=0.001,
-                               min = 0.0001,
-                               max =1.00)
-    unhide_behavior = BoolProperty(default = True)
+class HOPS_OT_CleanMeshOperator(bpy.types.Operator):
+    bl_idname      = "view3d.clean_mesh"
+    bl_label       = "Limited Dissolve"
+    bl_options     = {'REGISTER', 'UNDO'}
+    bl_description = """Clean Mesh
     
-    delete_interior = BoolProperty(default = False)
+Cleans mesh of Coplanar / Colinear / Degenerate / Duplicate FACES, EDGES and VERTS
+Advanced selection options in F6"""
 
-    text = "Limited Dissolve Removed"
-    op_tag = "Limited Dissolve / Remove Doubles"
+    text      = "Limited Dissolve Removed"
+    op_tag    = "Limited Dissolve / Remove Doubles"
     op_detail = "Angled Doubles Dissolved"
+
+    called_ui = False
+
+    def __init__(self):
+
+        HOPS_OT_CleanMeshOperator.called_ui = False
+
 
     @classmethod
     def poll(cls, context):
-        return getattr(context.active_object, "type", "") == "MESH"
+        return context.active_object and context.active_object.mode in {'OBJECT', 'EDIT'}
+
 
     def draw(self, context):
+
         layout = self.layout
-
         box = layout.box()
-        # DRAW YOUR PROPERTIES IN A BOX
-        box.prop( self, 'dissolve_angle', text = "Limited Disolve Angle")
-        box.prop( self, 'remove_threshold', text = "Remove Threshold")
-        box.prop( self, 'unhide_behavior', text = "Unhide Mesh")
-        box.prop( self, 'delete_interior', text = "Delete Interior Faces")
+        row = box.row()
 
-    def invoke(self, context, event):
-        self.execute(context)
+        row.prop(get_preferences().property, 'meshclean_mode', expand=True)
+        box.prop(get_preferences().property, 'meshclean_dissolve_angle', text="Limited Dissolve Angle")
+        box.prop(get_preferences().property, 'meshclean_remove_threshold', text="Remove Threshold")
+        box.prop(get_preferences().property, 'meshclean_unhide_behavior', text="Unhide Mesh")
+        box.prop(get_preferences().property, 'meshclean_delete_interior', text="Delete Interior Faces")
 
-        if tool_overlays_enabled():
-            disable_active_overlays()
-            self.wake_up_overlay = show_custom_overlay(draw,
-                parameter_getter = self.parameter_getter,
-                location = get_location_in_current_3d_view("CENTER", "BOTTOM", offset = (0, 130)),
-                location_type = "CUSTOM",
-                stay_time = Hops_display_time(),
-                fadeout_time = Hops_fadeout_time())
-
-        return {"FINISHED"}
-
-    def parameter_getter(self):
-        return self.dissolve_angle, self.remove_threshold, self.unhide_behavior, self.op_tag, self.op_detail
 
     def execute(self, context):
-        clean_mesh_active_object(
-            self.dissolve_angle,
-            self.remove_threshold,
-            self.unhide_behavior,
-            self.delete_interior,
-            self.text)
 
-        try: self.wake_up_overlay()
-        except: pass
+        self.object_mode = context.active_object.mode
+
+        if get_preferences().property.meshclean_mode == 'SELECTED':
+            if self.object_mode == 'OBJECT':
+                original_active_object = context.view_layer.objects.active
+
+                for object in context.selected_objects:
+                    if object.type == 'MESH':
+                        self.clean_mesh(context, object)
+
+                context.view_layer.objects.active = original_active_object
+
+            else:
+                if context.active_object.type == 'MESH':
+                    self.clean_mesh(context, context.active_object)
+
+        elif get_preferences().property.meshclean_mode == 'VISIBLE':
+            if self.object_mode == 'OBJECT':
+                original_active_object = context.view_layer.objects.active
+
+                for object in context.visible_objects:
+                    if object.type == 'MESH':
+                        self.clean_mesh(context, object)
+
+                context.view_layer.objects.active = original_active_object
+
+            else:
+                if context.active_object.type == 'MESH':
+                    mesh = bmesh.from_edit_mesh(context.active_object.data)
+
+                    original_selected_geometry = {'verts': [vert for vert in mesh.verts if vert.select],
+                                                  'edges': [edge for edge in mesh.edges if edge.select],
+                                                  'faces': [face for face in mesh.faces if face.select]}
+
+                    visible_geometry = {'verts': [vert for vert in mesh.verts if not vert.hide],
+                                        'edges': [edge for edge in mesh.edges if not edge.hide],
+                                        'faces': [face for face in mesh.faces if not face.hide]}
+
+                    # unselect geometry
+                    for type in original_selected_geometry:
+                        for geo in original_selected_geometry[type]:
+                            geo.select_set(False)
+
+                    # select visible
+                    for type in visible_geometry:
+                        for geo in visible_geometry[type]:
+                            geo.select_set(True)
+
+                    self.clean_mesh(context, context.active_object)
+
+        else:
+            if context.active_object.type == 'MESH':
+                self.clean_mesh(context, context.active_object)
+
+        bpy.ops.object.mode_set(mode=self.object_mode)
+
+        # Operator UI
+        if not HOPS_OT_CleanMeshOperator.called_ui:
+            HOPS_OT_CleanMeshOperator.called_ui = True
+
+            ui = Master()
+
+            draw_data = [
+                ["Clean Mesh"],
+                ["Remove Threshold", "%.1f" % get_preferences().property.meshclean_remove_threshold],
+                ["Dissovle Angle", "%.1f" % degrees(get_preferences().property.meshclean_dissolve_angle)+ "°"],
+                [f"Modifiers Applied / Remain", f"{0} / {len(context.active_object.modifiers[:])}"],
+                ["MeshClean Mode ", get_preferences().property.meshclean_mode]
+            ]
+
+            ui.receive_draw_data(draw_data=draw_data)
+            ui.draw(draw_bg=get_preferences().ui.Hops_operator_draw_bg, draw_border=get_preferences().ui.Hops_operator_draw_border)
 
         return {'FINISHED'}
-    
-#_____________________________________________________________clean mesh________________________
-def clean_mesh_active_object(dissolve_angle, remove_threshold, unhide_behavior, delete_interior, text):
-    clean_mesh(dissolve_angle,
-                remove_threshold,
-                unhide_behavior,
-                delete_interior)
-    #show_message(text)
-    object = bpy.context.active_object
-
-def clean_mesh(dissolve_angle, remove_threshold, unhide_behavior, delete_interior):
-    #EditMode Unhide / Select All
-    object = bpy.context.active_object
-    bpy.ops.object.mode_set(mode='EDIT')
-    if unhide_behavior == True:
-        bpy.ops.mesh.reveal()
-    
-    bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
-        
-    #Select All
-    bpy.ops.mesh.select_all(action='DESELECT')
-    bpy.ops.mesh.select_all(action='TOGGLE')
-
-    #Remove Doubles / Limited Dissolve
-    bpy.ops.mesh.dissolve_limited(angle_limit=dissolve_angle)
-    bpy.ops.mesh.remove_doubles(threshold=remove_threshold)
-    
-    if delete_interior == True:
-        delete_interior_faces()
-            
-    #Cstep Return
-    if object.hops.status == "CSTEP":
-        bpy.ops.mesh.hide(unselected=False)
-    
-    #Back To Object Mode
-    bpy.ops.object.editmode_toggle()
-    
-def delete_interior_faces():
-    #bpy.ops.object.editmode_toggle()
-    bpy.ops.mesh.select_all(action='DESELECT')
-    bpy.ops.mesh.select_interior_faces()
-    bpy.ops.mesh.delete(type='FACE')
-    
-
-def show_message(text):
-    pass
 
 
+    def clean_mesh(self, context, object):
 
-def draw(display, parameter_getter):
-    dissolve_angle, remove_threshold, unhide_behavior, op_detail, op_tag = parameter_getter()
-    scale_factor = 0.9
+        context.view_layer.objects.active = object
 
-    glEnable(GL_BLEND)
-    glEnable(GL_LINE_SMOOTH)
+        bpy.ops.object.mode_set(mode='EDIT')
 
-    set_drawing_dpi(display.get_dpi() * scale_factor)
-    dpi_factor = display.get_dpi_factor() * scale_factor
-    line_height = 18 * dpi_factor
+        if get_preferences().property.meshclean_unhide_behavior:
+            bpy.ops.mesh.reveal()
 
-    transparency = display.transparency
+        context.tool_settings.mesh_select_mode = (False, True, False)
 
-    color_text1, color_text2, color_border, color_border2 = get_hops_preferences_colors_with_transparency(transparency)
-    region_width = bpy.context.region.width
+        if get_preferences().property.meshclean_mode == 'ACTIVE' or self.object_mode == 'OBJECT':
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bpy.ops.mesh.select_all(action='TOGGLE')
 
-    # Box
-    ########################################################
+        bpy.ops.mesh.remove_doubles(threshold=get_preferences().property.meshclean_remove_threshold)
 
-    location = display.location
-    x, y = location.x - 60* dpi_factor, location.y - 118* dpi_factor
+        bpy.ops.mesh.dissolve_limited(angle_limit=get_preferences().property.meshclean_dissolve_angle)
 
-    draw_box(0, 43 *dpi_factor, region_width, -4 * dpi_factor, color = color_border2)
-    draw_box(0, 0, region_width, -82 * dpi_factor, color = color_border)
+        if get_preferences().property.meshclean_delete_interior:
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bpy.ops.mesh.select_interior_faces()
+            bpy.ops.mesh.delete(type='FACE')
 
-    draw_logo_csharp(color_border2)
-
-    # Name
-    ########################################################
-
-
-    draw_text("MESH CLEANED", x - 380 *dpi_factor , y -12*dpi_factor,
-              align = "LEFT", size = 20 , color = color_text2)
-              
-
-    # Fitst Coloumn
-    ########################################################
-
-    x = x - 160 * dpi_factor
-    r = 34 * dpi_factor
-    
-    draw_text("Dissolve Angle", x + r, y,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_text("{}°".format(round(degrees(dissolve_angle))), x, y ,size = 11, color = color_text2)
-
-    draw_text("Remove Double Threshold", x + r + 120, y - line_height,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_text("{:.3f}".format(remove_threshold), x + + r + 260, y - line_height, size = 12, color = color_text2)
-
-    draw_text("Unhide Mesh", x + r, y - line_height,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_boolean(unhide_behavior, x, y - line_height, size = 12, alpha = transparency)
-
-
-    # Last Part
-    ########################################################
-
-    x = x + 320 * dpi_factor
-        
-    draw_text(op_tag, x + r, y  * dpi_factor,
-              align = "LEFT", size = 11, color = color_text2)
-
-
-    draw_text(op_detail, x + r, y - line_height,
-              align = "LEFT", size = 11, color = color_text2)
-
-    glDisable(GL_BLEND)
-    glDisable(GL_LINE_SMOOTH)
+        bpy.ops.object.mode_set(mode='OBJECT')

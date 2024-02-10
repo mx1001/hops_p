@@ -1,34 +1,57 @@
-import os
 import bpy
-import bmesh
-from bgl import *
-from bpy.props import *
-from bpy.props import *
+from bpy.props import BoolProperty
 import bpy.utils.previews
-from random import choice
-from math import pi, radians
-from math import radians, degrees
-from ... utils.blender_ui import get_location_in_current_3d_view
-from ... overlay_drawer import show_custom_overlay, disable_active_overlays, show_text_overlay
-from ... graphics.drawing2d import set_drawing_dpi, draw_horizontal_line, draw_boolean, draw_text, draw_box, draw_logo_csharp
-from ... preferences import tool_overlays_enabled, get_hops_preferences_colors_with_transparency, Hops_display_time, Hops_fadeout_time
+from ... preferences import get_preferences
+from ...ui_framework.operator_ui import Master
+
+# _____________________________________________________________clear ssharps (OBJECT MODE)________________________
 
 
-#_____________________________________________________________clear ssharps (OBJECT MODE)________________________
-class un_sharpOperator(bpy.types.Operator):
-    '''Clear Off Sharps And Bevels In Object Mode'''
+class HOPS_OT_ClearCustomData(bpy.types.Operator):
+    bl_idname = "clean.customdata"
+    bl_label = "Clean Custom Data"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = """clean custom data"""
+
+    def execute(self, context):
+        active = bpy.context.active_object
+        for obj in context.selected_objects:
+            if obj.type == 'MESH':
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.mesh.customdata_custom_splitnormals_clear()
+        bpy.context.view_layer.objects.active = active
+        return {'FINISHED'}
+
+
+class HOPS_OT_UnSharpOperator(bpy.types.Operator):
     bl_idname = "clean.sharps"
     bl_label = "Remove Ssharps"
     bl_options = {'REGISTER', 'UNDO'}
+    bl_description = """Sharp Mark Removal 
+    
+    REMOVES all BEVEL modifiers and EDGE markings / Resets mesh to FLAT shading
+    Also can remove normal data
+    
+    F6 for additional parameters
+    
+    """
 
-    removeMods = BoolProperty(default = True)
-    clearsharps = BoolProperty(default = True)
-    clearbevel = BoolProperty(default = True)
-    clearcrease = BoolProperty(default = True)
+    removeMods: BoolProperty(default=True)
+    clearsharps: BoolProperty(default=True)
+    clearbevel: BoolProperty(default=True)
+    clearcrease: BoolProperty(default=True)
+    clearseam: BoolProperty(default=True)
+    clearcustomdata: BoolProperty(default=False)
 
     text = "SSharps Removed"
     op_tag = "Clean Ssharp"
     op_detail = "Selected Ssharps Removed"
+
+    called_ui = False
+
+    def __init__(self):
+
+        HOPS_OT_UnSharpOperator.called_ui = False
 
     @classmethod
     def poll(cls, context):
@@ -39,157 +62,99 @@ class un_sharpOperator(bpy.types.Operator):
 
         box = layout.box()
         # DRAW YOUR PROPERTIES IN A BOX
-        box.prop( self, 'removeMods', text = "RemoveModifiers?")
-        box.prop( self, 'clearsharps', text = "Clear Sharps")
-        box.prop( self, 'clearbevel', text = "Clear Bevels")
-        box.prop( self, 'clearcrease', text = "Clear Crease")
-
-    def invoke(self, context, event):
-        self.execute(context)
-
-        if tool_overlays_enabled():
-            disable_active_overlays()
-            self.wake_up_overlay = show_custom_overlay(draw,
-                parameter_getter = self.parameter_getter,
-                location = get_location_in_current_3d_view("CENTER", "BOTTOM", offset = (0, 130)),
-                location_type = "CUSTOM",
-                stay_time = Hops_display_time(),
-                fadeout_time = Hops_fadeout_time())
-
-        return {"FINISHED"}
-
-    def parameter_getter(self):
-        return self.clearsharps, self.clearbevel, self.clearcrease, self.op_tag, self.op_detail
+        box.prop(self, 'removeMods', text="RemoveModifiers?")
+        box.prop(self, 'clearsharps', text="Clear Sharps")
+        box.prop(self, 'clearbevel', text="Clear Bevels")
+        box.prop(self, 'clearcrease', text="Clear Crease")
+        box.prop(self, 'clearseam', text="Clear Seam")
+        box.prop(self, 'clearcustomdata', text="Clear Custom Data")
 
     def execute(self, context):
         clear_ssharps_active_object(
+            context,
             self.removeMods,
             self.clearsharps,
             self.clearbevel,
             self.clearcrease,
+            self.clearseam,
+            self.clearcustomdata,
             self.text)
 
-        try: self.wake_up_overlay()
-        except: pass
+        # Operator UI
+        if not HOPS_OT_UnSharpOperator.called_ui:
+            HOPS_OT_UnSharpOperator.called_ui = True
+
+            ui = Master()
+            draw_data = [
+                ["Clear Sharp Classic"],
+                ["Clear Custom Normal Data", self.clearcustomdata],
+                ["Clear Seam ", self.clearseam],
+                ["Clear Crease ", self.clearcrease],
+                ["Clear Bevel ", self.clearbevel],
+                ["Clear Sharps ", self.clearsharps]]
+            ui.receive_draw_data(draw_data=draw_data)
+            ui.draw(draw_bg=get_preferences().ui.Hops_operator_draw_bg, draw_border=get_preferences().ui.Hops_operator_draw_border)
 
         return {'FINISHED'}
 
+# _____________________________________________________________clear ssharps________________________
 
 
-#_____________________________________________________________clear ssharps________________________
-def clear_ssharps_active_object(removeMods, clearsharps, clearbevel, clearcrease, text):
-    remove_mods_shadeflat(removeMods)
-    clear_sharps(clearsharps,
-                clearbevel,
-                clearcrease)
-    #show_message(text)
+def clear_ssharps_active_object(context, removeMods, clearsharps, clearbevel, clearcrease, clearseam, clear_custom_data, text):
     object = bpy.context.active_object
+    remove_mods_shadeflat(removeMods, object)
+    clear_sharps(
+        context,
+        clearsharps,
+        clearbevel,
+        clearcrease,
+        clearseam,
+        clear_custom_data)
+    # show_message(text)
     object.hops.status = "UNDEFINED"
+    try:
+        bpy.data.collections['Hardops'].objects.unlink(object)
+    except:
+        pass
     bpy.ops.object.shade_flat()
 
-def clear_sharps(clearsharps, clearbevel, clearcrease):
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.reveal()
-    bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
 
-    if clearsharps == True:
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.mesh.select_all(action='TOGGLE')
+def clear_sharps(context, clearsharps, clearbevel, clearcrease, clearseam, clear_custom_data):
+    active = bpy.context.active_object
+    for obj in context.selected_objects:
+        if obj.type == 'MESH':
 
-        bpy.ops.mesh.mark_sharp(clear=True)
-    if clearbevel == True:
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.mesh.select_all(action='TOGGLE')
-        bpy.ops.transform.edge_bevelweight(value=-1)
-    if clearcrease == True:
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.mesh.select_all(action='TOGGLE')
+            bpy.context.view_layer.objects.active = obj
 
-        bpy.ops.transform.edge_crease(value=-1)
-    bpy.ops.object.editmode_toggle()
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.reveal()
+            bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bpy.ops.mesh.select_all(action='TOGGLE')
 
-def remove_mods_shadeflat(removeMods):
+            if clearsharps:
+                bpy.ops.mesh.mark_sharp(clear=True)
+            if clearbevel:
+                bpy.ops.transform.edge_bevelweight(value=-1)
+            if clearcrease:
+                bpy.ops.transform.edge_crease(value=-1)
+            if clearseam:
+                bpy.ops.mesh.mark_seam(clear=True)
+            if clear_custom_data:
+                bpy.ops.mesh.customdata_custom_splitnormals_clear()
+
+            bpy.ops.object.editmode_toggle()
+    bpy.context.view_layer.objects.active = active
+
+
+def remove_mods_shadeflat(removeMods, obj):
     if removeMods:
-        bpy.ops.object.modifier_remove(modifier="Bevel")
-        bpy.ops.object.modifier_remove(modifier="Solidify")
-
+        for mod in obj.modifiers:
+            if mod.type == 'WEIGHTED_NORMAL' or 'BEVEL' or 'SOLIDIFY':
+                obj.modifiers.remove(mod)
     else:
-        bpy.context.object.modifiers["Bevel"].limit_method = 'ANGLE'
-        bpy.context.object.modifiers["Bevel"].angle_limit = 0.7
+        return {"FINISHED"}
+
 
 def show_message(text):
     pass
-
-
-
-def draw(display, parameter_getter):
-    clearsharps, clearbevel, clearcrease, op_detail, op_tag = parameter_getter()
-    scale_factor = 0.9
-
-    glEnable(GL_BLEND)
-    glEnable(GL_LINE_SMOOTH)
-
-    set_drawing_dpi(display.get_dpi() * scale_factor)
-    dpi_factor = display.get_dpi_factor() * scale_factor
-    line_height = 18 * dpi_factor
-
-    transparency = display.transparency
-
-    color_text1, color_text2, color_border, color_border2 = get_hops_preferences_colors_with_transparency(transparency)
-    region_width = bpy.context.region.width
-
-    # Box
-    ########################################################
-
-    location = display.location
-    x, y = location.x - 60* dpi_factor, location.y - 118* dpi_factor
-
-    draw_box(0, 43 *dpi_factor, region_width, -4 * dpi_factor, color = color_border2)
-    draw_box(0, 0, region_width, -82 * dpi_factor, color = color_border)
-
-    draw_logo_csharp(color_border2)
-
-    # Name
-    ########################################################
-
-
-    draw_text("SSHARPS CLEARED", x - 380 *dpi_factor , y -12*dpi_factor,
-              align = "LEFT", size = 20 , color = color_text2)
-              
-
-    # Fitst Coloumn
-    ########################################################
-
-    x = x - 160 * dpi_factor
-    r = 34 * dpi_factor
-    
-    draw_text("Clear Sharps", x + r, y,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_boolean(clearsharps, x, y ,size = 11, alpha = transparency)
-
-    draw_text("Clear Bevelweight", x + r + 120, y - line_height,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_boolean(clearbevel, x + 120, y - line_height, size = 12, alpha = transparency)
-
-    draw_text("Clear Crease", x + r, y - line_height,
-              align = "LEFT",size = 11, color = color_text2)
-
-    draw_boolean(clearcrease, x, y - line_height, size = 12, alpha = transparency)
-
-
-    # Last Part
-    ########################################################
-
-    x = x + 320 * dpi_factor
-        
-    draw_text(op_tag, x, y  * dpi_factor,
-              align = "LEFT", size = 11, color = color_text2)
-
-
-    draw_text(op_detail, x + r, y - line_height,
-              align = "LEFT", size = 11, color = color_text2)
-
-    glDisable(GL_BLEND)
-    glDisable(GL_LINE_SMOOTH)
